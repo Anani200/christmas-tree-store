@@ -11,7 +11,7 @@ export default function Navbar() {
         🎄 Christmas Tree Store
       </Link>
       <div className={styles.links}>
-        <Link to="/">Shop</Link>
+        <Link to="/">Product Catalog</Link>
         {isAuthenticated ? (
           <>
             <span className={styles.userInfo}>{user?.email}</span>

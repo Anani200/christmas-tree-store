@@ -35,6 +35,17 @@ function App() {
           />
           <Route path="*" element={<CatalogPage />} />
         </Routes>
+        <footer style={{
+          textAlign: 'center',
+          padding: '1.5rem 1rem',
+          background: '#041208',
+          color: 'rgba(255,255,255,0.35)',
+          fontSize: '0.78rem',
+          letterSpacing: '0.04em',
+          borderTop: '1px solid rgba(255,255,255,0.06)'
+        }}>
+          🎄 Christmas Tree Store &nbsp;·&nbsp; Fresh Cut · Local Pickup · Seasonal
+        </footer>
       </AuthProvider>
     </BrowserRouter>
   );

@@ -29,10 +29,19 @@ export default function CatalogPage() {
           <p className={styles.heroSub}>
             Hand-selected fresh-cut trees. Order before they sell out!
           </p>
+          <div className={styles.heroBadges}>
+            <span className={styles.heroBadge}>🌲 Fresh Cut</span>
+            <span className={styles.heroBadge}>📍 Local Pickup</span>
+            <span className={styles.heroBadge}>❄️ Seasonal Selection</span>
+          </div>
         </div>
       </header>
 
       <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.sectionTitle}>Product Catalog</h2>
+          <p className={styles.sectionSub}>{products.length} varieties available this season</p>
+        </div>
         <div className={styles.grid}>
           {products.map((p, i) => (
             <TreeCard key={p.productId} product={p} index={i} />
