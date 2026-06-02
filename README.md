@@ -163,20 +163,58 @@ The order is committed to DynamoDB before the SQS message is sent. Notification 
 | Python | 3.12 |
 | Node.js | 18+ |
 
-### Step 1 — Clone
+### Option A — Automated (recommended)
+
+[`scripts/setup-aws.sh`](scripts/setup-aws.sh) handles the entire deployment in one command: SAM build → CloudFormation deploy → DynamoDB seed → frontend build → S3 upload → CORS update → CloudFront invalidation → smoke tests.
 
 ```bash
-git clone <repo-url> christmas-tree-store && cd christmas-tree-store
+# 1. Clone and enter the repo
+git clone https://github.com/Anani200/christmas-tree-store.git christmas-tree-store
+cd christmas-tree-store
+
+# 2. Configure AWS credentials (skip if already configured)
+aws configure                        # set region to us-east-1
+aws sts get-caller-identity          # verify
+
+# 3. Run the deployment script
+RETAILER_EMAIL=you@example.com ./scripts/setup-aws.sh
 ```
 
-### Step 2 — Configure AWS credentials
+The script accepts these optional environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RETAILER_EMAIL` | *(empty)* | SNS email for order notifications |
+| `STACK_NAME` | `christmas-tree-store` | CloudFormation stack name |
+| `REGION` | `us-east-1` | AWS region |
+| `PROJECT_NAME` | `christmas-tree-store` | Resource name prefix |
+
+When the script finishes it prints the live URL and reminds you to confirm the SNS subscription email if one was set.
+
+> **After deploy:** check your inbox for **"AWS Notification — Subscription Confirmation"** and click the link to activate order notification emails.
+
+---
+
+### Option B — Manual steps
+
+<details>
+<summary>Expand manual deployment steps</summary>
+
+#### Step 1 — Clone
+
+```bash
+git clone https://github.com/Anani200/christmas-tree-store.git christmas-tree-store
+cd christmas-tree-store
+```
+
+#### Step 2 — Configure AWS credentials
 
 ```bash
 aws configure          # set region to us-east-1
 aws sts get-caller-identity   # verify
 ```
 
-### Step 3 — Build and deploy infrastructure
+#### Step 3 — Build and deploy infrastructure
 
 ```bash
 cd infra && sam build && sam deploy --guided
@@ -201,11 +239,11 @@ aws cloudformation describe-stacks \
 
 Key outputs: `CloudFrontUrl`, `UserPoolId`, `UserPoolClientId`, `FrontendBucketName`.
 
-### Step 4 — Confirm SNS email subscription
+#### Step 4 — Confirm SNS email subscription
 
 Check your inbox for **"AWS Notification — Subscription Confirmation"** and click the link.
 
-### Step 5 — Seed product catalog
+#### Step 5 — Seed product catalog
 
 ```bash
 cd ../backend
@@ -218,7 +256,7 @@ AWS_DEFAULT_REGION=us-east-1 \
 
 Verify: `aws dynamodb scan --table-name christmas-tree-store-products --region us-east-1 --query "Count" --no-cli-pager` → `5`
 
-### Step 6 — Build and deploy the frontend
+#### Step 6 — Build and deploy the frontend
 
 ```bash
 cd ../frontend
@@ -235,21 +273,21 @@ npm install && npm run build
 aws s3 sync dist/ "s3://<FrontendBucketName>/" --delete
 ```
 
-### Step 7 — Update CORS
+#### Step 7 — Update CORS
 
 ```bash
 cd ../infra
 sam deploy --parameter-overrides "CorsAllowedOrigin=https://<CloudFrontUrl>"
 ```
 
-### Step 8 — Invalidate CloudFront cache
+#### Step 8 — Invalidate CloudFront cache
 
 ```bash
 aws cloudfront create-invalidation \
   --distribution-id <DistributionId> --paths "/*"
 ```
 
-### Step 9 — Verify
+#### Step 9 — Verify
 
 ```bash
 CF=https://<CloudFrontUrl>
@@ -257,6 +295,8 @@ curl -s -o /dev/null -w "%{http_code}" "$CF/"      # 200
 curl -s "$CF/api/health"                           # {"status":"ok",...}
 curl -s "$CF/api/products" | python3 -m json.tool  # 5 products
 ```
+
+</details>
 
 ### Teardown
 
