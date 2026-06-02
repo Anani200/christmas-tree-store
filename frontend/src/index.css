@@ -1,0 +1,94 @@
+/* ── Christmas Tree Store Global Styles ── */
+
+:root {
+  --color-dark-green: #0f3320;
+  --color-medium-green: #1e6b3a;
+  --color-light-green: #e6f4ec;
+  --color-red: #c0392b;
+  --color-gold: #f0c040;
+  --color-cream: #f8faf7;
+  --color-card-bg: #ffffff;
+  --color-card-shadow: rgba(15, 51, 32, 0.12);
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-base: 'Inter', system-ui, -apple-system, sans-serif;
+  --transition-fast: 0.2s ease;
+  --transition-med: 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+body {
+  font-family: var(--font-base);
+  background: var(--color-cream);
+  color: #1a2e1a;
+  line-height: 1.5;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  line-height: 1.2;
+}
+
+/* ── Keyframe animations ── */
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(28px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes snowDrift {
+  0%   { transform: translateY(-20px) translateX(0) rotate(0deg); opacity: 0; }
+  5%   { opacity: 1; }
+  95%  { opacity: 0.6; }
+  100% { transform: translateY(110vh) translateX(40px) rotate(720deg); opacity: 0; }
+}
+
+@keyframes heroShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50%       { background-position: 100% 50%; }
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.9; }
+  50%       { opacity: 0.15; }
+}
+
+@keyframes starPulse {
+  0%, 70%, 100% { transform: scale(1); }
+  80%            { transform: scale(1.4) rotate(20deg); }
+  90%            { transform: scale(0.9) rotate(-10deg); }
+}
+
+@keyframes badgePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(133, 100, 4, 0.5); }
+  50%       { box-shadow: 0 0 0 6px rgba(133, 100, 4, 0); }
+}
+
+.loading {
+  text-align: center;
+  padding: 3rem;
+  font-size: 1.1rem;
+  color: #666;
+}

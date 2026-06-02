@@ -1,0 +1,450 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Christmas Tree Store — serverless ecommerce demo.
+  S3+CloudFront (SPA), API Gateway+Lambda (Python 3.12), Cognito (auth),
+  DynamoDB (products/orders), SQS+SNS (async order notifications).
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: christmas-tree-store
+    Description: Used as a prefix/tag for all resources.
+  RetailerEmail:
+    Type: String
+    Default: ''
+    Description: >
+      Optional. If provided, an SNS email subscription is created for the
+      retailer. Email subscription requires manual confirmation via AWS email.
+  CorsAllowedOrigin:
+    Type: String
+    Default: http://localhost:5173
+    Description: >
+      Origin allowed by API Gateway CORS during development. In production this
+      should be the CloudFront distribution URL (no wildcards).
+
+Conditions:
+  HasRetailerEmail: !Not [!Equals [!Ref RetailerEmail, '']]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 256
+    Tracing: Active
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        PROJECT_NAME: !Ref ProjectName
+        LOG_LEVEL: INFO
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # DynamoDB
+  # ---------------------------------------------------------------------------
+  ProductsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ProjectName}-products
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: productId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: productId
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ProjectName}-orders
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # ---------------------------------------------------------------------------
+  # SQS (with DLQ) + SNS
+  # ---------------------------------------------------------------------------
+  OrderDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${ProjectName}-order-dlq
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  OrderQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${ProjectName}-order-queue
+      VisibilityTimeout: 60
+      MessageRetentionPeriod: 345600  # 4 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt OrderDLQ.Arn
+        maxReceiveCount: 3
+
+  OrderNotificationsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${ProjectName}-order-notifications
+      DisplayName: Christmas Tree Orders
+
+  OrderNotificationsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasRetailerEmail
+    Properties:
+      TopicArn: !Ref OrderNotificationsTopic
+      Protocol: email
+      Endpoint: !Ref RetailerEmail
+
+  # ---------------------------------------------------------------------------
+  # Cognito
+  # ---------------------------------------------------------------------------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${ProjectName}-users
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub ${ProjectName}-web
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+
+  # ---------------------------------------------------------------------------
+  # API Gateway (REST, Regional) with Cognito authorizer on POST /orders
+  # ---------------------------------------------------------------------------
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${ProjectName}-api
+      StageName: prod
+      EndpointConfiguration:
+        Type: REGIONAL
+      Cors:
+        AllowOrigin: !Sub "'${CorsAllowedOrigin}'"
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowCredentials: true
+      Auth:
+        Authorizers:
+          CognitoAuth:
+            UserPoolArn: !GetAtt UserPool.Arn
+            Identity:
+              Header: Authorization
+        # No DefaultAuthorizer — API is public by default.
+        # POST /orders opts into CognitoAuth via per-event Auth below.
+        AddDefaultAuthorizerToCorsPreflight: false
+
+  # ---------------------------------------------------------------------------
+  # Lambdas
+  # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Auth Lambda — Cognito proxy (login / register / confirm / refresh / logout)
+  # ---------------------------------------------------------------------------
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-auth
+      CodeUri: ../backend/
+      Handler: src.handlers.auth.handler
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref UserPool
+          USER_POOL_CLIENT_ID: !Ref UserPoolClient
+          CORS_ALLOWED_ORIGIN: !Ref CorsAllowedOrigin
+          SERVICE_NAME: auth
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:InitiateAuth
+                - cognito-idp:SignUp
+                - cognito-idp:ConfirmSignUp
+                - cognito-idp:GlobalSignOut
+              Resource: !GetAtt UserPool.Arn
+      Events:
+        AuthLogin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/login
+            Method: post
+        AuthRegister:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/register
+            Method: post
+        AuthConfirm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/confirm
+            Method: post
+        AuthRefresh:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/refresh
+            Method: post
+        AuthLogout:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/logout
+            Method: post
+
+  AuthLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AuthFunction}
+      RetentionInDays: 14
+
+  OrderApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-order-api
+      CodeUri: ../backend/
+      Handler: src.handlers.order_api.handler
+      Environment:
+        Variables:
+          PRODUCTS_TABLE: !Ref ProductsTable
+          ORDERS_TABLE: !Ref OrdersTable
+          ORDER_QUEUE_URL: !Ref OrderQueue
+          SERVICE_NAME: order-api
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref ProductsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref OrdersTable }
+        - SQSSendMessagePolicy: { QueueName: !GetAtt OrderQueue.QueueName }
+      Events:
+        Health:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /health
+            Method: get
+        ListProducts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products
+            Method: get
+        GetProduct:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products/{productId}
+            Method: get
+        CreateOrder:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /orders
+            Method: post
+            Auth:
+              Authorizer: CognitoAuth
+
+  OrderApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${OrderApiFunction}
+      RetentionInDays: 14
+
+  NotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-notification
+      CodeUri: ../backend/
+      Handler: src.handlers.notification.handler
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref OrderNotificationsTopic
+          SERVICE_NAME: order-notification
+      Policies:
+        - SQSPollerPolicy: { QueueName: !GetAtt OrderQueue.QueueName }
+        - SNSPublishMessagePolicy: { TopicName: !GetAtt OrderNotificationsTopic.TopicName }
+      Events:
+        OrderQueueTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt OrderQueue.Arn
+            BatchSize: 1
+
+  NotificationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${NotificationFunction}
+      RetentionInDays: 14
+
+  # ---------------------------------------------------------------------------
+  # CloudFront Function — strips /api prefix so API Gateway sees /health etc.
+  # ---------------------------------------------------------------------------
+  ApiPathRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub ${ProjectName}-api-path-rewrite
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Strip /api prefix before forwarding to API Gateway origin
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var uri = request.uri;
+          if (uri.startsWith('/api/')) {
+            request.uri = uri.substring(4);
+          } else if (uri === '/api') {
+            request.uri = '/';
+          }
+          return request;
+        }
+
+  # ---------------------------------------------------------------------------
+  # S3 (private) + CloudFront with OAC for SPA hosting + /api/* to API Gateway
+  # ---------------------------------------------------------------------------
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${ProjectName}-frontend-${AWS::AccountId}-${AWS::Region}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${ProjectName}-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub ${ProjectName} SPA + API
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+          - Id: ApiOrigin
+            DomainName: !Sub ${RestApi}.execute-api.${AWS::Region}.amazonaws.com
+            OriginPath: /prod
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: ApiOrigin
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # Managed-AllViewerExceptHostHeader
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !Ref ApiPathRewriteFunction
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${FrontendBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway invoke URL (stage prod)
+    Value: !Sub https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+  CloudFrontUrl:
+    Description: CloudFront distribution URL
+    Value: !Sub https://${CloudFrontDistribution.DomainName}
+  FrontendBucketName:
+    Description: S3 bucket for SPA assets
+    Value: !Ref FrontendBucket
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+  Region:
+    Value: !Ref AWS::Region
+  ProductsTableName:
+    Value: !Ref ProductsTable
+  OrdersTableName:
+    Value: !Ref OrdersTable
+  OrderQueueUrl:
+    Value: !Ref OrderQueue
+  OrderDLQUrl:
+    Value: !Ref OrderDLQ
+  OrderNotificationsTopicArn:
+    Value: !Ref OrderNotificationsTopic

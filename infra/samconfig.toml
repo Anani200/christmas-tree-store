@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "christmas-tree-store"
+capabilities = ["CAPABILITY_IAM"]
+resolve_s3 = true
+confirm_changeset = false
+
+[default.deploy.parameters.parameter_overrides]
+ProjectName = "christmas-tree-store"
+CorsAllowedOrigin = "http://localhost:5173"
+
+[default.global.parameters]
+region = "us-east-1"

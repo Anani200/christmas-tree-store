@@ -1,0 +1,71 @@
+.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.75rem;
+  height: 60px;
+  background: linear-gradient(135deg, #0a2218 0%, #0f3320 60%, #122e1e 100%);
+  color: var(--color-cream);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.3);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: blur(6px);
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--color-gold);
+  letter-spacing: -0.01em;
+  text-shadow: 0 0 18px rgba(240, 192, 64, 0.45);
+  transition: filter 0.2s;
+}
+
+.brand:hover {
+  filter: brightness(1.15);
+}
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.links a {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+  transition: color 0.15s;
+}
+
+.links a:hover {
+  color: var(--color-gold);
+}
+
+.userInfo {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.logoutBtn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.85);
+  padding: 0.3rem 0.85rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: var(--font-base);
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.logoutBtn:hover {
+  background: var(--color-red);
+  border-color: var(--color-red);
+  color: #fff;
+}
