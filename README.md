@@ -2,6 +2,8 @@
 
 A fully serverless ecommerce application for a seasonal Christmas tree retailer. Customers browse fresh-cut trees, create an account, and place pickup orders — all without a single always-on server.
 
+![Christmas Tree Store](docs/christmas-tree-store.png)
+
 ---
 
 ## Table of Contents
